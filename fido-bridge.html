@@ -1,0 +1,176 @@
+<!doctype html>
+<!--
+  WebAuthn PRF bridge for the UWI Wallet MPC + FIDO backup.
+
+  The app opens this page inside an in-app browser session (Chrome Custom Tabs on Android,
+  ASWebAuthenticationSession on iOS) via flutter_web_auth_2. The page runs a REAL browser
+  WebAuthn PRF ceremony — the same mechanism as ndg-hcw-fido-tee-poc — against this page's own
+  origin as the relying party (so no native app↔domain association is needed), and returns the
+  two 32-byte PRF outputs to the app through a custom-scheme redirect.
+
+  URL contract (the app sets these in the fragment so they never hit the server logs):
+    https://<host>/fido-bridge.html#first=<b64url salt1>&second=<b64url salt2>&cb=<scheme>&allow_create=<0|1>
+  Callback (custom scheme the app listens for):
+    <scheme>://callback?first=<b64url>&second=<b64url>&credId=<b64url>
+    <scheme>://callback?error=<message>
+
+  Deploy: place this file at the ROOT of the <user>.github.io Pages repo (next to index.html),
+  so it is served at https://<user>.github.io/fido-bridge.html over HTTPS (a secure context,
+  which WebAuthn requires). The relying-party id is this page's hostname.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>UWI Wallet — passkey</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+        margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        background: #0b1020; color: #e8ecf4; padding: 24px;
+      }
+      .card { width: 100%; max-width: 360px; text-align: center; }
+      .icon { font-size: 44px; margin-bottom: 8px; }
+      h1 { font-size: 20px; margin: 8px 0; font-weight: 600; }
+      p { font-size: 14px; line-height: 1.5; color: #aab3c5; margin: 8px 0 24px; }
+      button {
+        width: 100%; padding: 14px 16px; font-size: 16px; font-weight: 600; border: 0;
+        border-radius: 12px; background: #4f7cff; color: #fff; cursor: pointer;
+      }
+      button:disabled { opacity: .6; cursor: default; }
+      .err { color: #ff8a8a; font-size: 13px; margin-top: 16px; min-height: 18px; }
+      .spinner {
+        width: 22px; height: 22px; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff;
+        border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: middle;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="icon" aria-hidden="true">🔐</div>
+      <h1 id="title">Protect your wallet</h1>
+      <p id="msg">
+        Use your passkey to derive the key that encrypts your wallet backup. Your credentials and
+        signing key can then be recovered with this passkey alone.
+      </p>
+      <button id="go">Continue with passkey</button>
+      <div class="err" id="err"></div>
+    </div>
+    <script>
+      (function () {
+        function b64urlToBytes(s) {
+          s = s.replace(/-/g, "+").replace(/_/g, "/");
+          while (s.length % 4) s += "=";
+          var bin = atob(s), u = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+          return u;
+        }
+        function bytesToB64url(buf) {
+          var u = new Uint8Array(buf), s = "";
+          for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+          return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        }
+        function randBytes(n) { var u = new Uint8Array(n); crypto.getRandomValues(u); return u; }
+
+        var params = new URLSearchParams(location.hash.slice(1));
+        var cb = params.get("cb") || "uwiprf";
+        var saltFirst = params.get("first");
+        var saltSecond = params.get("second");
+        var allowCreate = params.get("allow_create") !== "0";
+        var rpId = location.hostname;
+
+        var elTitle = document.getElementById("title");
+        var elMsg = document.getElementById("msg");
+        var elGo = document.getElementById("go");
+        var elErr = document.getElementById("err");
+
+        function done(query) { location.replace(cb + "://callback?" + query); }
+        function fail(message) { done("error=" + encodeURIComponent(message)); }
+
+        if (!saltFirst || !saltSecond) { fail("missing PRF salts"); return; }
+        if (!window.PublicKeyCredential) { fail("WebAuthn is not supported in this browser"); return; }
+
+        var prfEval = {
+          first: b64urlToBytes(saltFirst).buffer,
+          second: b64urlToBytes(saltSecond).buffer,
+        };
+
+        async function getAssertion() {
+          var publicKey = {
+            challenge: randBytes(32),
+            rpId: rpId,
+            timeout: 120000,
+            userVerification: "required",
+            allowCredentials: [], // discoverable: let a synced passkey be chosen
+            extensions: { prf: { eval: prfEval } },
+          };
+          var cred = await navigator.credentials.get({ publicKey: publicKey });
+          var ext = cred.getClientExtensionResults();
+          if (!ext.prf || !ext.prf.results || !ext.prf.results.first || !ext.prf.results.second) {
+            throw new Error("this passkey/authenticator did not return a PRF result");
+          }
+          return {
+            first: bytesToB64url(ext.prf.results.first),
+            second: bytesToB64url(ext.prf.results.second),
+            credId: bytesToB64url(cred.rawId),
+          };
+        }
+
+        async function createPasskey() {
+          var publicKey = {
+            challenge: randBytes(32),
+            rp: { id: rpId, name: "UWI Wallet" },
+            user: { id: randBytes(16), name: "uwi-wallet", displayName: "UWI Wallet" },
+            pubKeyCredParams: [
+              { type: "public-key", alg: -7 },   // ES256
+              { type: "public-key", alg: -257 }, // RS256
+            ],
+            authenticatorSelection: { residentKey: "required", userVerification: "required" },
+            timeout: 120000,
+            attestation: "none",
+            extensions: { prf: {} }, // enable PRF; results are read on the follow-up assertion
+          };
+          await navigator.credentials.create({ publicKey: publicKey });
+        }
+
+        function isNoCredential(e) {
+          return e && (e.name === "NotAllowedError" || e.name === "InvalidStateError" ||
+            /no .*credential/i.test(e.message || ""));
+        }
+
+        async function run() {
+          elGo.disabled = true;
+          elErr.textContent = "";
+          elTitle.innerHTML = '<span class="spinner"></span>';
+          elMsg.textContent = "Follow your device's prompt…";
+          try {
+            var r;
+            try {
+              r = await getAssertion();
+            } catch (e) {
+              if (allowCreate && isNoCredential(e)) {
+                await createPasskey();
+                r = await getAssertion();
+              } else {
+                throw e;
+              }
+            }
+            done("first=" + r.first + "&second=" + r.second + "&credId=" + r.credId);
+          } catch (e) {
+            // Re-enable so the user can retry; also surface the message.
+            elTitle.textContent = "Couldn't use your passkey";
+            elMsg.textContent = "Tap to try again, or return to the app to use the fallback.";
+            elGo.disabled = false;
+            elErr.textContent = (e && e.message) || String(e);
+          }
+        }
+
+        // WebAuthn requires a user gesture, so the ceremony starts on the button tap.
+        elGo.addEventListener("click", run);
+      })();
+    </script>
+  </body>
+</html>
