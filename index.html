@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  Passkey relying-party (RP) association host for the UWI Wallet MPC + FIDO backup.
+
+  Deploy: copy the CONTENTS of this folder (tool/passkey-rp/) to the ROOT of your
+  GitHub user/org Pages repo `<user>.github.io` (NOT a project page — passkey RP
+  IDs are host-only, no path, and the well-known files must sit at the host root).
+
+  After GitHub Pages publishes, these must return 200:
+    https://<user>.github.io/.well-known/assetlinks.json
+    https://<user>.github.io/.well-known/apple-app-site-association
+
+  Then run the app with the RP host:
+    flutter run --dart-define=UWI_PASSKEY_RP_ID=<user>.github.io \
+                --dart-define=UWI_MPC_GATEWAY=http://10.0.2.2:8081
+
+  `.nojekyll` (in this folder) makes Pages publish the dotted `.well-known` folder.
+  The Apple file (apple-app-site-association) intentionally has NO extension.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UWI Wallet — Passkey RP</title>
+  </head>
+  <body>
+    <h1>UWI Wallet — passkey relying party</h1>
+    <p>
+      This host serves the WebAuthn relying-party association files for the UWI
+      Wallet (Android Digital Asset Links and Apple App Site Association). It is
+      not a user-facing page.
+    </p>
+    <ul>
+      <li><a href="./.well-known/assetlinks.json">/.well-known/assetlinks.json</a></li>
+      <li><a href="./.well-known/apple-app-site-association">/.well-known/apple-app-site-association</a></li>
+    </ul>
+  </body>
+</html>

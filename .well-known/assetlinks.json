@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.accenture.uwi.holder.app",
+      "sha256_cert_fingerprints": [
+        "27:6A:89:55:9E:CF:C4:C7:ED:AD:6A:DF:14:7F:12:DE:B4:6A:93:03:19:3A:5E:C0:8B:DC:E0:90:86:80:37:C4"
+      ]
+    }
+  }
+]
